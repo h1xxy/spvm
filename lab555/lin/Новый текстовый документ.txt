@@ -1,0 +1,58 @@
+#include <iostream>
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+#include <string>
+#include <dlfcn.h>
+using namespace std;
+
+pthread_t ReaderThread_t;                           // Потоковые переменные
+pthread_t WriterThread_t;
+
+typedef void*(*FUNC)(void*);
+FUNC WriterThread;
+FUNC ReaderThread;
+
+void f(int p)                                       // Функция обработчик сигнал
+{
+	if (p==10)
+		pthread_kill(ReaderThread_t,p);             // Отправляет сигнал в поток для использования dll функции
+	if (p==12 || p==13)
+		pthread_kill(WriterThread_t,p);
+};
+
+int main()
+{
+	void* sohandle = dlopen("/home/marti/IODLL.so", RTLD_LAZY | RTLD_LOCAL);  // Загрузка файла динамической библиотеки с ленивой привязкой(доступ только во время выполнения кода)
+	if (!sohandle)
+	{
+		cout << "Error opening dynamic lib!\n";
+		exit(0);
+	}
+
+	WriterThread = (FUNC)dlsym(sohandle,"_Z12WriterThreadPv");             // Принимает дескриптор передаваемой ф-ции записи и возращает адрес
+	if (!WriterThread)
+	{
+		cout << "Error opening WriterThread function!\n";
+		exit(0);
+	}
+	if (!(ReaderThread = (FUNC)dlsym(sohandle,"_Z12ReaderThreadPv")))      // Принимает дескриптор передаваемой ф-ции чтения и возращает адрес
+	{
+		cout << "Error opening ReaderThread function!\n";
+		exit(0);
+	}
+
+	int pipes[2];                                                          // Создание двух каналов чтения и записи
+	pipe(pipes);
+
+	signal(10,f);                                                          // Установка обработчика сигнала
+	signal(12,f);
+	signal(13,f);
+
+	pthread_create(&ReaderThread_t, NULL, ReaderThread, &pipes[1]);        // Создание потока с передачей адреса на динамическую функцию чтения и канал чтения
+	pthread_create(&WriterThread_t, NULL, WriterThread, &pipes[0]);        // Создание потока с передачей адреса на динамическую функцию записи и канал записи
+
+	getchar();
+	dlclose(sohandle);                                                     // Выгружение динамической библиотеки 
+	return 0;
+}
